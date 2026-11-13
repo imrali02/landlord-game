@@ -1,0 +1,23 @@
+[Unit]
+Description=Landlord multiplayer board game (haidery.dev/landlordgame)
+After=network.target
+
+[Service]
+Type=simple
+User=landlord
+Group=landlord
+WorkingDirectory=/opt/landlordgame
+Environment=NODE_ENV=production
+Environment=PORT=3100
+Environment=HOST=127.0.0.1
+Environment=BASE_PATH=/landlordgame
+ExecStart=/usr/bin/node /opt/landlordgame/dist/server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
