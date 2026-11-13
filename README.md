@@ -52,11 +52,22 @@ To test multiplayer on one machine, open the game at `localhost` in one tab and 
 
 ## Deploy
 
+### Automatic (GitHub Actions)
+
+Every push to `main`, including merged pull requests, runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). It type-checks, builds, runs the engine simulation, and then deploys to the VM. Pull requests get the same build and test without deploying. You can also start a deploy by hand from the repo's **Actions** tab (**Build & deploy → Run workflow**).
+
+The workflow pipes a release tarball over SSH using the `DEPLOY_SSH_KEY` repository secret. On the VM, that key's entry in `/root/.ssh/authorized_keys` is pinned with `restrict,command="/usr/local/sbin/landlordgame-receive"`, so it cannot open a shell or run anything else. The receive script ([`deploy/receive.sh`](deploy/receive.sh)):
+
+1. Installs the release into `/opt/landlordgame` and restarts the service.
+2. Rolls back to the previous release (`/opt/landlordgame.prev`) if the health check fails.
+
+### Manual
+
 ```bash
 bash deploy/deploy.sh
 ```
 
-This builds locally, uploads to the VM, installs into `/opt/landlordgame`, and restarts the `landlordgame` systemd service. The service listens on `127.0.0.1:3100` and runs as the unprivileged `landlord` user. On first run the script also adds the `/landlordgame/` proxy block from `deploy/nginx-landlordgame.conf` to `/etc/nginx/sites-available/haidery.dev`. It backs up that file first and reloads nginx only if `nginx -t` passes.
+This builds locally and deploys through the same receive script, using your own SSH access. It also performs first-time setup: the receive script, the `landlord` user, the systemd service, and the nginx `/landlordgame/` proxy block (`deploy/nginx-setup.sh`, which backs up the site config and reloads nginx only if `nginx -t` passes). The service listens on `127.0.0.1:3100` and runs as the unprivileged `landlord` user.
 
 Server-side commands:
 

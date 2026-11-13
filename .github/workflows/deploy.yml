@@ -1,0 +1,75 @@
+# Builds and tests every pull request. On every push to main (including merged
+# PRs) it also deploys to haidery.dev/landlordgame.
+#
+# Required repository secret:
+#   DEPLOY_SSH_KEY – private half of the deploy key. On the VM, the public half
+#                    is pinned to /usr/local/sbin/landlordgame-receive, so it
+#                    can only install a release (see deploy/receive.sh).
+name: Build & deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_HOST: root@89.117.67.35
+  # The VM's SSH host key, so the runner refuses to talk to an impostor.
+  DEPLOY_HOST_KEY: 89.117.67.35 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILCj+5ToKYd4PblAEsPrtEq1kMdQ7miyBUsBE9nCfF7u
+  SITE_URL: https://haidery.dev/landlordgame/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Engine simulation
+        run: npm test -- 100 20000
+
+      - name: Package release
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${GITHUB_SHA::7} (GitHub Actions run ${GITHUB_RUN_NUMBER})" > RELEASE
+          tar czf landlordgame.tgz dist package.json package-lock.json deploy RELEASE
+
+      - name: Deploy to VM
+        if: github.event_name != 'pull_request'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::The DEPLOY_SSH_KEY secret is not set (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$DEPLOY_HOST" < landlordgame.tgz
+
+      - name: Check live site
+        if: github.event_name != 'pull_request'
+        run: |
+          curl -fsS -o /dev/null -w "Site: HTTP %{http_code}\n" "$SITE_URL"
+          curl -fsS "${SITE_URL}healthz"
